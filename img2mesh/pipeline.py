@@ -79,6 +79,14 @@ class Img2Mesh:
                 str(checkpoint), str(SINGLE_FILE_CONFIG), use_safetensors=checkpoint.suffix == ".safetensors"
             )
         else:
+            folder = Path(os.environ.get("CHECKPOINT_DIR", "/checkpoints"))
+            seen = sorted(p.name for p in folder.iterdir())[:10] if folder.is_dir() else []
+            log.info(
+                "no single-file checkpoint %s in %s (found: %s); using the Tencent layout "
+                "(HUNYUAN_DIR), which downloads if missing. To use ComfyUI's file, set "
+                "COMFYUI_CHECKPOINTS in a file named exactly .env next to docker-compose.yml.",
+                os.environ.get("HUNYUAN_CHECKPOINT", "hunyuan_3d_v2.1.safetensors"), folder, ", ".join(seen) or "nothing",
+            )
             self.shape = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(MODEL)
         self.rembg_session = new_session(REMBG_MODEL)
         self.remove_floaters = FloaterRemover()
