@@ -3,7 +3,7 @@ name: image
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "LICENSE*", "NOTICE", ".env.example", "tests/**"]
+    paths-ignore: ["**.md", "LICENSE*", "NOTICE", ".env.example", ".gitignore", "docker-compose.yml", "tests/**"]
   workflow_dispatch:
 
 permissions:

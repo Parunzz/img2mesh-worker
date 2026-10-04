@@ -38,7 +38,17 @@ docker compose pull
 
 `pull` downloads the ready-made image from GHCR. If it fails, `docker compose build` builds it locally instead (15–30 minutes).
 
-The first run of any command downloads the model weights (several GB) into the `models` Docker volume. Later runs start in about a minute.
+The first run of any command downloads the model weights (several GB) into `models/Hunyuan3D-2.1` next to `docker-compose.yml`. Later runs start in about a minute.
+
+### Already have Hunyuan3D-2.1 downloaded?
+
+Point the worker at it instead of downloading again. Find the folder that contains `hunyuan3d-dit-v2-1\config.yaml` and `hunyuan3d-dit-v2-1\model.fp16.ckpt` (only these two files are needed), and put its path in `.env`:
+
+```
+HUNYUAN_DIR=D:/AI/Hunyuan3D-2.1
+```
+
+Common places: `C:/Users/<you>/.cache/hy3dgen/tencent/Hunyuan3D-2.1` (Hunyuan's own app), or a folder you cloned from Hugging Face. Use forward slashes. A Hugging Face cache snapshot (`models--tencent--Hunyuan3D-2.1/snapshots/...`) or a ComfyUI single-file model won't work: they use links or a different file layout. If the files aren't found, the worker downloads them into that folder.
 
 ## Try it: the test page
 
@@ -81,7 +91,7 @@ docker compose pull
 docker compose up -d worker
 ```
 
-Model weights stay in the volume and are not downloaded again.
+Model weights stay in `models/` (or your `HUNYUAN_DIR`) and are not downloaded again.
 
 ## Input tips
 
@@ -119,6 +129,7 @@ docker run --rm -v "$PWD":/app -w /app python:3.10-slim sh -c "pip install -r re
    cd img2mesh-worker
    docker compose pull
    ```
+   ถ้ามี Hunyuan3D-2.1 อยู่ในเครื่องแล้ว ไม่ต้องโหลดใหม่: ก๊อป `.env.example` เป็น `.env` แล้วใส่ `HUNYUAN_DIR=` เป็นโฟลเดอร์ที่มี `hunyuan3d-dit-v2-1` อยู่ข้างใน (ใช้ `/` เช่น `D:/AI/Hunyuan3D-2.1`)
 3. **ลองบนหน้าเว็บทดสอบ**: `docker compose --profile ui up ui` แล้วเปิด http://localhost:7860 อัปโหลดรูป ตั้งความสูง (mm) กด Generate ครั้งแรกจะโหลดไฟล์โมเดลหลาย GB รอสักพัก
 4. **ลองแบบคำสั่ง**: วางรูปในโฟลเดอร์ `data` แล้วรัน `docker compose run --rm worker generate /data/photo.png --height-mm 150` จะได้ `data/photo.stl`
 5. **ต่อกับเว็บไซต์** (หลังเว็บพร้อม): ก๊อป `.env.example` เป็น `.env` ใส่ `SITE_URL`, `WORKER_SECRET`, `WORKER_NAME` แล้วรัน `docker compose up -d worker` ปิดเครื่องเปิดใหม่ worker จะเริ่มเองถ้า Docker Desktop เปิดพร้อม Windows
