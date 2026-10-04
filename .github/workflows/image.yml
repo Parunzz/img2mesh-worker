@@ -25,6 +25,8 @@ jobs:
           sudo docker image prune --all --force
           df -h /
       - uses: actions/checkout@v4
+      # Registry paths must be lowercase; the owner is "Parunzz".
+      - run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -48,5 +50,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # Registry cache: the GitHub Actions cache caps at 10 GB per repo, and
           # these CUDA images evicted each other's layers mid-build.
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/img2mesh-worker:buildcache-${{ matrix.engine }}
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/img2mesh-worker:buildcache-${{ matrix.engine }},mode=max,image-manifest=true,oci-mediatypes=true
+          cache-from: type=registry,ref=ghcr.io/${{ env.OWNER }}/img2mesh-worker:buildcache-${{ matrix.engine }}
+          cache-to: type=registry,ref=ghcr.io/${{ env.OWNER }}/img2mesh-worker:buildcache-${{ matrix.engine }},mode=max,image-manifest=true,oci-mediatypes=true
