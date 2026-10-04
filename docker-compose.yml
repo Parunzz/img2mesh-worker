@@ -1,8 +1,11 @@
 name: img2mesh
 
 x-gpu-service: &gpu-service
-  image: ghcr.io/parunzz/img2mesh-worker:latest
-  build: .
+  # ENGINE in .env picks the model: hunyuan (default) or trellis2. Each has its own image.
+  image: ghcr.io/parunzz/img2mesh-worker:${ENGINE:-hunyuan}
+  build:
+    context: .
+    dockerfile: Dockerfile.${ENGINE:-hunyuan}
   env_file:
     - path: .env
       required: false
@@ -14,6 +17,8 @@ x-gpu-service: &gpu-service
     # Or a ComfyUI checkpoints folder holding hunyuan_3d_v2.1.safetensors: set
     # COMFYUI_CHECKPOINTS in .env. When that file is there, it is used instead.
     - ${COMFYUI_CHECKPOINTS:-./models/checkpoints}:/checkpoints:ro
+    # TRELLIS.2 weights (TRELLIS.2-4B/, TRELLIS-image-large/, dinov3-vitl16-pretrain-lvd1689m/).
+    - ${TRELLIS_DIR:-./models/trellis2}:/models/trellis2
     - cache:/models    # background-removal model and other small caches
     - ./data:/data     # your images in, STL files out (for `generate`)
   deploy:

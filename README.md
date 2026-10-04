@@ -2,7 +2,14 @@
 
 Photo → printable STL, on your own NVIDIA GPU, in Docker.
 
-`image → background removal → Hunyuan3D 2.1 (shape) → clean-up → flat back and bottom, scaled to a height in mm → STL`
+`image → background removal → 3D model (shape) → clean-up → flat back and bottom, scaled to a height in mm → STL`
+
+Two engines, picked with `ENGINE` in `.env`; each has its own Docker image:
+
+| `ENGINE` | Model | Licence | Notes |
+|---|---|---|---|
+| `hunyuan` (default) | [Tencent Hunyuan3D 2.1](https://huggingface.co/tencent/Hunyuan3D-2.1) | Tencent community licence (not EU/UK/South Korea) | Reads the image at 518 px. Can reuse ComfyUI's file. |
+| `trellis2` | [Microsoft TRELLIS.2-4B](https://huggingface.co/microsoft/TRELLIS.2-4B) | MIT (+ Meta DINOv3 licence for its image encoder) | Reads the image at 1024 px: more face detail. Needs a Hugging Face token once. |
 
 Three ways to use the same image:
 
@@ -60,6 +67,25 @@ HUNYUAN_DIR=C:/Users/<you>/.cache/hy3dgen/tencent/Hunyuan3D-2.1
 
 A Hugging Face *cache* snapshot (`models--tencent--Hunyuan3D-2.1/snapshots/...`) won't work: it is made of links. If nothing is found, the worker downloads into `HUNYUAN_DIR` (default `models/Hunyuan3D-2.1`).
 
+### TRELLIS.2 setup
+
+1. In `.env`: `ENGINE=trellis2`, then `docker compose pull` (a separate image).
+2. Its image encoder, Meta's DINOv3, is gated. Once: open https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m , request access (wait for approval), create a **read** token at https://huggingface.co/settings/tokens and add `HF_TOKEN=hf_...` to `.env`.
+3. First start downloads about 9 GB into `models/trellis2` (or `TRELLIS_DIR`): only the shape models, not the texture ones.
+
+Already have the weights? Arrange them in one folder and set `TRELLIS_DIR` to it:
+
+```
+TRELLIS_DIR/
+  TRELLIS.2-4B/                     pipeline.json, ckpts/ (from microsoft/TRELLIS.2-4B)
+  TRELLIS-image-large/ckpts/        ss_dec_conv3d_16l8_fp16.json + .safetensors
+  dinov3-vitl16-pretrain-lvd1689m/  config.json, model.safetensors (Hugging Face format)
+```
+
+ComfyUI's TRELLIS.2 files (`trellis_2_int8_convrot.safetensors`, `dino_v3_L_naf_fp32.safetensors`) are a different, quantised format and can't be used here.
+
+TRELLIS.2 is officially tested on 24 GB GPUs. The worker runs it in low-VRAM mode (models move to system RAM between steps), so 16 GB cards may work at **Detail 1024**; if you run out of memory, use **512**.
+
 ## Try it: the test page
 
 ```sh
@@ -68,7 +94,7 @@ docker compose --profile ui up ui
 
 Open http://localhost:7860, upload an image, set the height, press **Generate**. The STL appears in the 3D view with a download link. Change the **seed** for a different result from the same image. `Ctrl+C` stops it.
 
-Stop the `worker` service first if it is running (`docker compose stop worker`): two copies of the model don't fit in 16 GB.
+Stop the `worker` service first if it is running (`docker compose stop worker`): two copies of the model don't fit in 16 GB. To compare engines, change `ENGINE` in `.env` and start the page again.
 
 ## Try it: command line
 
@@ -124,7 +150,8 @@ docker run --rm -v "$PWD":/app -w /app python:3.10-slim sh -c "pip install -r re
 | Path | |
 |---|---|
 | `img2mesh/printable.py` | Orientation, flat back/bottom, scaling. Pure geometry, tested. |
-| `img2mesh/pipeline.py` | Background removal + Hunyuan3D 2.1 + mesh clean-up (GPU) |
+| `img2mesh/pipeline.py` | Shared options, background removal, engine base and STL step |
+| `img2mesh/engines/` | `hunyuan.py`, `trellis2.py`: image → raw mesh (GPU) |
 | `img2mesh/protocol.py`, `serve.py` | Pull protocol v1 client and the worker loop, tested against a fake site |
 | `img2mesh/ui.py` | The test page (Gradio) |
 
@@ -139,6 +166,7 @@ docker run --rm -v "$PWD":/app -w /app python:3.10-slim sh -c "pip install -r re
    cd img2mesh-worker
    docker compose pull
    ```
+   เลือกโมเดลด้วย `ENGINE=` ใน `.env`: `hunyuan` (ค่าเริ่มต้น) หรือ `trellis2` (หน้าคนละเอียดกว่า ต้องใส่ `HF_TOKEN` ครั้งแรก ดูหัวข้อ TRELLIS.2 setup ด้านบน) เปลี่ยนแล้วรัน `docker compose pull` ใหม่
    ถ้ามี Hunyuan3D-2.1 อยู่ในเครื่องแล้ว ไม่ต้องโหลดใหม่: ก๊อป `.env.example` เป็น `.env` แล้วใส่
    - ไฟล์จาก ComfyUI (`hunyuan_3d_v2.1.safetensors`): `COMFYUI_CHECKPOINTS=C:/AI/ComfyUI/models/checkpoints`
    - หรือแบบของ Tencent: `HUNYUAN_DIR=` เป็นโฟลเดอร์ที่มี `hunyuan3d-dit-v2-1` อยู่ข้างใน

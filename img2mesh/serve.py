@@ -25,18 +25,21 @@ def options_from(job: Job) -> tuple[GenerateOptions, PrintOptions]:
     o = job.options
     if "height_mm" not in o:
         raise ValueError("job options must include height_mm")
+    optional_int = lambda key: int(o[key]) if o.get(key) is not None else None  # noqa: E731
     generate = GenerateOptions(
         remove_background=o.get("remove_background", "auto"),
         seed=int(o.get("seed", 1234)),
-        steps=int(o.get("steps", 50)),
-        octree_resolution=int(o.get("octree_resolution", 384)),
+        steps=optional_int("steps"),
+        guidance_scale=float(o["guidance_scale"]) if o.get("guidance_scale") is not None else None,
+        detail=optional_int("detail") or optional_int("octree_resolution"),  # octree_resolution: v1 name
+        max_faces=int(o.get("max_faces", 300_000)),
     )
     printable = PrintOptions(
         height_mm=float(o["height_mm"]),
         flat_back=float(o.get("flat_back", 0.04)),
         flat_bottom=float(o.get("flat_bottom", 0.02)),
-        up=o.get("up", "+y"),
-        front=o.get("front", "+z"),
+        up=o.get("up"),
+        front=o.get("front"),
     )
     generate.validate()
     printable.validate()

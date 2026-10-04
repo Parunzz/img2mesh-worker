@@ -19,18 +19,21 @@ def _print_options(args):
 def _generate_options(args):
     from .pipeline import GenerateOptions
 
-    return GenerateOptions(remove_background=args.remove_background, seed=args.seed, steps=args.steps, octree_resolution=args.octree)
+    return GenerateOptions(
+        remove_background=args.remove_background, seed=args.seed, steps=args.steps,
+        guidance_scale=args.guidance, detail=args.detail, max_faces=args.max_faces,
+    )
 
 
 def cmd_generate(args) -> int:
     from PIL import Image
 
-    from .pipeline import Img2Mesh
+    from .pipeline import load_engine
 
     printable, generate = _print_options(args), _generate_options(args)
     printable.validate()
     generate.validate()
-    engine = Img2Mesh()
+    engine = load_engine()
     stl, stats = engine.to_stl(Image.open(args.image), generate, printable)
     output = Path(args.output or Path(args.image).with_suffix(".stl"))
     output.write_bytes(stl)
@@ -39,12 +42,12 @@ def cmd_generate(args) -> int:
 
 
 def cmd_serve(args) -> int:
-    from .pipeline import Img2Mesh
+    from .pipeline import load_engine
     from .protocol import Client
     from .serve import serve
 
     client = Client(os.environ.get("SITE_URL", ""), os.environ.get("WORKER_SECRET", ""), os.environ.get("WORKER_NAME", ""))
-    serve(Img2Mesh, client, once=args.once)
+    serve(load_engine, client, once=args.once)
     return 0
 
 
@@ -56,7 +59,7 @@ def cmd_ui(args) -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="img2mesh", description="Photo to printable STL with Hunyuan3D 2.1")
+    parser = argparse.ArgumentParser(prog="img2mesh", description="Photo to printable STL (engine: ENGINE=hunyuan or trellis2)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     gen = sub.add_parser("generate", help="one image -> one STL")
@@ -65,12 +68,15 @@ def main(argv=None) -> int:
     gen.add_argument("--height-mm", type=float, required=True)
     gen.add_argument("--flat-back", type=float, default=0.04, help="share of depth cut off the back (0-0.5)")
     gen.add_argument("--flat-bottom", type=float, default=0.02, help="share of height cut off the bottom (0-0.5)")
-    gen.add_argument("--up", default="+y")
-    gen.add_argument("--front", default="+z")
+    gen.add_argument("--up", help="raw up axis; default: the engine's")
+    gen.add_argument("--front", help="raw front axis; default: the engine's")
     gen.add_argument("--remove-background", choices=["auto", "always", "never"], default="auto")
     gen.add_argument("--seed", type=int, default=1234)
-    gen.add_argument("--steps", type=int, default=50)
-    gen.add_argument("--octree", type=int, choices=[256, 384, 512], default=384)
+    gen.add_argument("--steps", type=int, help="default: the engine's (Hunyuan 50, TRELLIS.2 12)")
+    gen.add_argument("--guidance", type=float, help="how closely to follow the image; default: the engine's")
+    gen.add_argument("--detail", type=int, choices=[256, 384, 512, 1024, 1536],
+                     help="Hunyuan: 256/384/512 (default 384); TRELLIS.2: 512/1024/1536 (default 1024)")
+    gen.add_argument("--max-faces", type=int, default=300_000)
     gen.set_defaults(func=cmd_generate)
 
     srv = sub.add_parser("serve", help="pull jobs from SITE_URL (protocol v1)")

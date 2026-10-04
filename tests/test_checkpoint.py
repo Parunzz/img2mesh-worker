@@ -1,4 +1,4 @@
-from img2mesh.pipeline import SINGLE_FILE_CONFIG, single_file_checkpoint
+from img2mesh.engines.hunyuan import SINGLE_FILE_CONFIG, single_file_checkpoint
 
 
 def test_uses_comfyui_file_when_present(tmp_path, monkeypatch):

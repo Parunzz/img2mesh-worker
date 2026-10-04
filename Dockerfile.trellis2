@@ -1,0 +1,68 @@
+# img2mesh worker, TRELLIS.2 engine: Microsoft TRELLIS.2-4B shape generation -> printable STL.
+# Stage 1 compiles TRELLIS.2's CUDA extensions; stage 2 is a slim runtime.
+
+ARG TORCH=2.7.1
+ARG TORCHVISION=0.22.1
+ARG XFORMERS=0.0.31.post1
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu128
+ARG TRELLIS_COMMIT=75fbf0183001ed9876c8dbb35de6b68552ee08bd
+ARG CUMESH_COMMIT=12289e1062f0603f2f0d0771b02e1395d247f26f
+ARG FLEXGEMM_COMMIT=6dd94a859c26ee8246888502eada3dd8ad85532e
+
+# ---------- build: CuMesh, FlexGEMM, o-voxel ----------
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS build
+ARG TORCH TORCHVISION TORCH_INDEX TRELLIS_COMMIT CUMESH_COMMIT FLEXGEMM_COMMIT
+ENV DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1 PIP_ROOT_USER_ACTION=ignore PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3.10 python3.10-dev python3-pip git build-essential ninja-build \
+ && rm -rf /var/lib/apt/lists/*
+RUN python3.10 -m pip install --upgrade pip setuptools wheel \
+ && python3.10 -m pip install torch==${TORCH} torchvision==${TORCHVISION} --index-url ${TORCH_INDEX} \
+ && python3.10 -m pip install numpy==1.26.4 plyfile trimesh tqdm zstandard easydict
+
+# RTX 30xx (8.6), 40xx (8.9), H100 (9.0), RTX 50xx (12.0). MAX_JOBS keeps RAM use modest.
+ARG MAX_JOBS=4
+ENV TORCH_CUDA_ARCH_LIST="8.6;8.9;9.0;12.0" MAX_JOBS=${MAX_JOBS} BUILD_TARGET=cuda
+WORKDIR /src
+RUN git clone -q --recursive https://github.com/JeffreyXiang/CuMesh.git && git -C CuMesh checkout -q ${CUMESH_COMMIT} && git -C CuMesh submodule update -q --init --recursive \
+ && git clone -q --recursive https://github.com/JeffreyXiang/FlexGEMM.git && git -C FlexGEMM checkout -q ${FLEXGEMM_COMMIT} && git -C FlexGEMM submodule update -q --init --recursive \
+ && git init -q TRELLIS.2 && git -C TRELLIS.2 fetch -q --depth 1 https://github.com/microsoft/TRELLIS.2.git ${TRELLIS_COMMIT} \
+ && git -C TRELLIS.2 checkout -q FETCH_HEAD && git -C TRELLIS.2 submodule update -q --init --recursive
+RUN python3.10 -m pip wheel --no-build-isolation --no-deps -w /wheels ./CuMesh
+RUN python3.10 -m pip wheel --no-build-isolation --no-deps -w /wheels ./FlexGEMM
+RUN python3.10 -m pip wheel --no-build-isolation --no-deps -w /wheels ./TRELLIS.2/o-voxel
+RUN cp -r TRELLIS.2/trellis2 /trellis2 && cp TRELLIS.2/LICENSE /trellis2/LICENSE.TRELLIS2
+
+# ---------- runtime ----------
+FROM python:3.10-slim-bookworm
+ARG TORCH TORCHVISION XFORMERS TORCH_INDEX
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_ROOT_USER_ACTION=ignore PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip install --upgrade pip \
+ && pip install torch==${TORCH} torchvision==${TORCHVISION} xformers==${XFORMERS} --index-url ${TORCH_INDEX}
+COPY requirements-trellis2.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt
+COPY --from=build /wheels /tmp/wheels
+RUN pip install --no-deps /tmp/wheels/*.whl && rm -rf /tmp/wheels
+COPY --from=build /trellis2 /opt/trellis2/trellis2
+COPY docker/stubs /opt/stubs
+
+# Sparse attention via xformers (prebuilt for CUDA 12.8) instead of flash-attn.
+ENV ENGINE=trellis2 \
+    ATTN_BACKEND=xformers \
+    SPARSE_ATTN_BACKEND=xformers \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    PYTHONPATH=/opt/trellis2:/opt/stubs:/app \
+    TRELLIS_ROOT=/models/trellis2 \
+    HF_HOME=/models/huggingface \
+    U2NET_HOME=/models/u2net \
+    GRADIO_ANALYTICS_ENABLED=False
+
+WORKDIR /app
+COPY LICENSE NOTICE /app/
+COPY img2mesh /app/img2mesh
+
+ENTRYPOINT ["python", "-m", "img2mesh"]
+CMD ["serve"]

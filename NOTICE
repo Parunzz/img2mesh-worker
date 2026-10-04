@@ -1,10 +1,14 @@
 img2mesh-worker
 Copyright (c) 2026 Parunyu Anakitbumrung. Licensed under the MIT License (see LICENSE).
 
-This software downloads and runs Tencent Hunyuan 3D 2.1, and its Docker image
-contains the unmodified `hy3dshape` package from
-https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1 (commit 82920d643c0dc2f7bfd7255f45f62d386edfe60c), and the unmodified
-`hunyuan3d-dit-v2-1/config.yaml` from https://huggingface.co/tencent/Hunyuan3D-2.1
+This software downloads and runs third-party models. Their licences apply to them
+and to their output; read them before commercial use.
+
+== Hunyuan engine (image tag: hunyuan / latest) ==
+
+The image contains the unmodified `hy3dshape` package from
+https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1 (commit 82920d643c0dc2f7bfd7255f45f62d386edfe60c),
+and the unmodified `hunyuan3d-dit-v2-1/config.yaml` from https://huggingface.co/tencent/Hunyuan3D-2.1
 (as img2mesh/hunyuan3d-dit-v2-1.yaml).
 
 Tencent Hunyuan 3D 2.1 is licensed under the Tencent Hunyuan 3D 2.1 Community License Agreement, Copyright © 2025 Tencent. All Rights Reserved. The trademark rights of “Tencent Hunyuan” are owned by Tencent or its affiliate.
@@ -12,3 +16,21 @@ Tencent Hunyuan 3D 2.1 is licensed under the Tencent Hunyuan 3D 2.1 Community Li
 A copy of that agreement is in LICENSE-HUNYUAN3D-2.1.txt. It does not apply in the
 European Union, the United Kingdom or South Korea, and use of Hunyuan 3D 2.1 or its
 output there is not licensed.
+
+== TRELLIS.2 engine (image tag: trellis2) ==
+
+The image contains, unmodified:
+- the `trellis2` package and `o-voxel` from https://github.com/microsoft/TRELLIS.2
+  (commit 75fbf0183001ed9876c8dbb35de6b68552ee08bd), MIT License, Copyright (c) Microsoft Corporation;
+- CuMesh (https://github.com/JeffreyXiang/CuMesh) and FlexGEMM
+  (https://github.com/JeffreyXiang/FlexGEMM), MIT License, Copyright (c) 2025 Jianfeng Xiang,
+  with their bundled cubvh and xatlas (MIT) and Eigen (MPL 2.0).
+
+It downloads, on first start:
+- microsoft/TRELLIS.2-4B and microsoft/TRELLIS-image-large weights (MIT);
+- facebook/dinov3-vitl16-pretrain-lvd1689m, under Meta's DINOv3 License
+  (https://ai.meta.com/resources/models-and-libraries/dinov3-license), gated on Hugging Face.
+
+Not included and not used: briaai/RMBG-2.0 (TRELLIS.2's default background remover,
+licensed CC BY-NC 4.0) and NVIDIA nvdiffrast (non-commercial licence); a stub stands
+in for the latter's import (docker/stubs). Background removal uses rembg's u2net (Apache 2.0).

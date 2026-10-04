@@ -47,9 +47,13 @@ The site must hand each job to one worker only (for example
 | `flat_back` | `0.04` | Share of the model's depth cut off the back, 0–0.5 |
 | `flat_bottom` | `0.02` | Share of the model's height cut off the bottom, 0–0.5 |
 | `seed` | `1234` | Change for a different result from the same image |
-| `steps` | `50` | Diffusion steps, 1–200 |
-| `octree_resolution` | `384` | Mesh detail: 256, 384 or 512 |
-| `up`, `front` | `"+y"`, `"+z"` | Axes of the raw Hunyuan output; rarely changed |
+| `steps` | engine's | Diffusion steps, 1–200 (Hunyuan 50, TRELLIS.2 12) |
+| `guidance_scale` | engine's | How closely to follow the image (Hunyuan 5, TRELLIS.2 7.5) |
+| `detail` | engine's | Hunyuan 256/384/512 (384); TRELLIS.2 512/1024/1536 (1024). `octree_resolution` is accepted as an alias |
+| `max_faces` | `300000` | Triangle budget of the result |
+| `up`, `front` | engine's | Axes of the raw output; rarely changed |
+
+Which engine runs is the worker's choice (`ENGINE`), reported back in `stats.engine`.
 
 Invalid options fail the job (step 3), not the worker.
 

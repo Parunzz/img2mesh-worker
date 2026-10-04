@@ -28,9 +28,10 @@ class PrintOptions:
     flat_back: float = 0.04
     # Share of the model's height cut off the bottom to leave a flat base (0 = no cut).
     flat_bottom: float = 0.02
-    # Which raw axes point up and towards the viewer. Hunyuan3D outputs Y-up.
-    up: str = "+y"
-    front: str = "+z"
+    # Which raw axes point up and towards the viewer. None = the engine's own
+    # (Hunyuan: +y/+z, TRELLIS.2: +z/-y); "+y"/"+z" when used without an engine.
+    up: str | None = None
+    front: str | None = None
 
     def validate(self) -> None:
         if not self.height_mm > 0:
@@ -39,10 +40,14 @@ class PrintOptions:
             value = getattr(self, name)
             if not 0 <= value < 0.5:
                 raise ValueError(f"{name} must be between 0 and 0.5")
-        if self.up not in AXES or self.front not in AXES:
+        up, front = self.axes()
+        if up not in AXES or front not in AXES:
             raise ValueError(f"up and front must be one of {', '.join(AXES)}")
-        if abs(np.dot(AXES[self.up], AXES[self.front])) != 0:
+        if abs(np.dot(AXES[up], AXES[front])) != 0:
             raise ValueError("up and front must be different, perpendicular axes")
+
+    def axes(self) -> tuple[str, str]:
+        return self.up or "+y", self.front or "+z"
 
 
 def orientation(up: str, front: str) -> np.ndarray:
@@ -90,7 +95,7 @@ def make_printable(mesh: trimesh.Trimesh, options: PrintOptions) -> trimesh.Trim
     options.validate()
     mesh = mesh.copy()
     mesh.merge_vertices()
-    mesh.apply_transform(orientation(options.up, options.front))
+    mesh.apply_transform(orientation(*options.axes()))
 
     lo, hi = mesh.bounds
     size = hi - lo

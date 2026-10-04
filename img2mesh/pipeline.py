@@ -1,6 +1,7 @@
-"""Image -> raw mesh with Hunyuan3D 2.1 (shape only). Needs an NVIDIA GPU.
+"""What every engine shares: options, background removal, and the printable STL step.
 
-Heavy imports happen inside `Img2Mesh` so the CLI, protocol and geometry code
+An engine turns a prepared RGBA image into a raw mesh (see `img2mesh/engines/`).
+Heavy imports happen inside the engines, so the CLI, protocol and geometry code
 load (and test) on machines without torch or a GPU.
 """
 
@@ -9,8 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass, field, replace
 
 import trimesh
 from PIL import Image
@@ -19,18 +19,8 @@ from .printable import PrintOptions, make_printable
 
 log = logging.getLogger("img2mesh")
 
-MODEL = os.environ.get("HUNYUAN_MODEL", "tencent/Hunyuan3D-2.1")
 REMBG_MODEL = os.environ.get("REMBG_MODEL", "u2net")
-# Hunyuan's own config for the 2.1 shape model, for single-file checkpoints
-# (such as ComfyUI's hunyuan_3d_v2.1.safetensors) that don't carry one.
-SINGLE_FILE_CONFIG = Path(__file__).with_name("hunyuan3d-dit-v2-1.yaml")
-
-
-def single_file_checkpoint() -> Path | None:
-    """A single-file checkpoint mounted at CHECKPOINT_DIR, if there is one."""
-    folder = Path(os.environ.get("CHECKPOINT_DIR", "/checkpoints"))
-    path = folder / os.environ.get("HUNYUAN_CHECKPOINT", "hunyuan_3d_v2.1.safetensors")
-    return path if path.is_file() else None
+ENGINES = ("hunyuan", "trellis2")
 
 
 @dataclass(frozen=True)
@@ -38,18 +28,24 @@ class GenerateOptions:
     # "auto": remove the background only if the image has no transparency.
     remove_background: str = "auto"  # auto | always | never
     seed: int = 1234
-    steps: int = 50
-    guidance_scale: float = 5.0
-    octree_resolution: int = 384
+    # None = the engine's own default (Hunyuan 50 steps / guidance 5; TRELLIS.2 12 / 7.5).
+    steps: int | None = None
+    guidance_scale: float | None = None
+    # Detail. Hunyuan: octree resolution 256/384/512. TRELLIS.2: 512, 1024 or 1536 (cascade).
+    detail: int | None = None
     max_faces: int = 300_000
 
     def validate(self) -> None:
         if self.remove_background not in ("auto", "always", "never"):
             raise ValueError("remove_background must be auto, always or never")
-        if not 1 <= self.steps <= 200:
+        if self.steps is not None and not 1 <= self.steps <= 200:
             raise ValueError("steps must be between 1 and 200")
-        if self.octree_resolution not in (256, 384, 512):
-            raise ValueError("octree_resolution must be 256, 384 or 512")
+        if self.guidance_scale is not None and not 0 < self.guidance_scale <= 20:
+            raise ValueError("guidance_scale must be between 0 and 20")
+        if self.detail is not None and self.detail not in (256, 384, 512, 1024, 1536):
+            raise ValueError("detail must be 256, 384, 512, 1024 or 1536")
+        if not 10_000 <= self.max_faces <= 5_000_000:
+            raise ValueError("max_faces must be between 10,000 and 5,000,000")
 
 
 @dataclass
@@ -65,33 +61,18 @@ def has_transparency(image: Image.Image) -> bool:
     return image.getchannel("A").getextrema()[0] < 255
 
 
-class Img2Mesh:
-    def __init__(self) -> None:
-        import torch  # noqa: F401 - fail early with a clear error if torch is missing
-        from rembg import new_session
-        from hy3dshape import DegenerateFaceRemover, FaceReducer, FloaterRemover
-        from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
+class Engine:
+    """Base class. Subclasses set `name`, `raw_up`, `raw_front` and implement `make_mesh`."""
 
-        checkpoint = single_file_checkpoint()
-        if checkpoint:
-            log.info("loading shape model from %s", checkpoint)
-            self.shape = Hunyuan3DDiTFlowMatchingPipeline.from_single_file(
-                str(checkpoint), str(SINGLE_FILE_CONFIG), use_safetensors=checkpoint.suffix == ".safetensors"
-            )
-        else:
-            folder = Path(os.environ.get("CHECKPOINT_DIR", "/checkpoints"))
-            seen = sorted(p.name for p in folder.iterdir())[:10] if folder.is_dir() else []
-            log.info(
-                "no single-file checkpoint %s in %s (found: %s); using the Tencent layout "
-                "(HUNYUAN_DIR), which downloads if missing. To use ComfyUI's file, set "
-                "COMFYUI_CHECKPOINTS in a file named exactly .env next to docker-compose.yml.",
-                os.environ.get("HUNYUAN_CHECKPOINT", "hunyuan_3d_v2.1.safetensors"), folder, ", ".join(seen) or "nothing",
-            )
-            self.shape = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(MODEL)
+    name = "engine"
+    raw_up = "+y"
+    raw_front = "+z"
+    detail_choices: tuple[int, ...] = ()
+
+    def __init__(self) -> None:
+        from rembg import new_session
+
         self.rembg_session = new_session(REMBG_MODEL)
-        self.remove_floaters = FloaterRemover()
-        self.remove_degenerate = DegenerateFaceRemover()
-        self.reduce_faces = FaceReducer()
 
     def prepare(self, image: Image.Image, mode: str) -> Image.Image:
         from rembg import remove
@@ -101,45 +82,54 @@ class Img2Mesh:
             image = remove(image.convert("RGB"), session=self.rembg_session, bgcolor=[255, 255, 255, 0])
         return image
 
-    def generate(self, image: Image.Image, options: GenerateOptions, on_progress=None) -> Result:
-        import torch
+    def make_mesh(self, image: Image.Image, options: GenerateOptions, on_progress=None) -> tuple[trimesh.Trimesh, dict]:
+        raise NotImplementedError
 
+    def generate(self, image: Image.Image, options: GenerateOptions, on_progress=None) -> Result:
         options.validate()
-        seconds = {}
+        if options.detail is not None and options.detail not in self.detail_choices:
+            raise ValueError(f"{self.name} detail must be one of {', '.join(map(str, self.detail_choices))}")
         start = time.monotonic()
         prepared = self.prepare(image, options.remove_background)
-        seconds["background"] = time.monotonic() - start
-
-        start = time.monotonic()
-        mesh = self.shape(
-            image=prepared,
-            num_inference_steps=options.steps,
-            guidance_scale=options.guidance_scale,
-            generator=torch.Generator().manual_seed(options.seed),
-            octree_resolution=options.octree_resolution,
-            callback=(lambda step, *_: on_progress(step, options.steps)) if on_progress else None,
-            callback_steps=1 if on_progress else None,
-        )[0]
-        seconds["shape"] = time.monotonic() - start
-
-        start = time.monotonic()
-        mesh = self.remove_floaters(mesh)
-        mesh = self.remove_degenerate(mesh)
-        mesh = self.reduce_faces(mesh, max_facenum=options.max_faces)
-        seconds["cleanup"] = time.monotonic() - start
+        seconds = {"background": time.monotonic() - start}
+        mesh, more = self.make_mesh(prepared, options, on_progress)
+        seconds.update(more)
         return Result(mesh=mesh, prepared_image=prepared, seconds=seconds)
 
     def to_stl(self, image: Image.Image, generate: GenerateOptions, printable: PrintOptions, on_progress=None) -> tuple[bytes, dict]:
         """The whole job: image in, printable binary STL out, plus stats."""
+        printable = replace(printable, up=printable.up or self.raw_up, front=printable.front or self.raw_front)
+        printable.validate()
         result = self.generate(image, generate, on_progress)
         start = time.monotonic()
         mesh = make_printable(result.mesh, printable)
         result.seconds["printable"] = time.monotonic() - start
         stl = mesh.export(file_type="stl")
         stats = {
+            "engine": self.name,
             "seconds": {k: round(v, 2) for k, v in result.seconds.items()},
             "faces": int(len(mesh.faces)),
             "watertight": bool(mesh.is_watertight),
             "size_mm": [round(float(v), 2) for v in mesh.extents],
         }
         return stl, stats
+
+
+def engine_name() -> str:
+    name = os.environ.get("ENGINE", "hunyuan").strip().lower()
+    if name not in ENGINES:
+        raise ValueError(f"ENGINE must be one of {', '.join(ENGINES)}, not {name!r}")
+    return name
+
+
+def load_engine() -> Engine:
+    """The engine named by ENGINE (default hunyuan). Loads its model, which takes a while."""
+    name = engine_name()
+    log.info("engine: %s", name)
+    if name == "trellis2":
+        from .engines.trellis2 import Trellis2Engine
+
+        return Trellis2Engine()
+    from .engines.hunyuan import HunyuanEngine
+
+    return HunyuanEngine()

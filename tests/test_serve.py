@@ -126,5 +126,12 @@ def test_options_defaults():
     from img2mesh.protocol import Job
 
     generate, printable = options_from(Job("1", "", "", {"height_mm": 120}))
-    assert generate.remove_background == "auto" and generate.steps == 50
-    assert printable.flat_back == 0.04 and printable.front == "+z"
+    assert generate.remove_background == "auto" and generate.steps is None and generate.detail is None
+    assert printable.flat_back == 0.04 and printable.front is None  # engine decides
+
+
+def test_v1_octree_resolution_still_sets_detail():
+    from img2mesh.protocol import Job
+
+    generate, _ = options_from(Job("1", "", "", {"height_mm": 120, "octree_resolution": 512}))
+    assert generate.detail == 512
