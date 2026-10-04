@@ -56,6 +56,17 @@ def orientation(up: str, front: str) -> np.ndarray:
     return matrix
 
 
+def to_gltf_axes(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Printer axes (Z up, front -Y) -> glTF axes (Y up, front +Z), for previews.
+
+    glTF loaders handle viewer handedness themselves; raw STL in some viewers
+    (Babylon.js, used by Gradio) shows mirrored.
+    """
+    mesh = mesh.copy()
+    mesh.apply_transform(orientation("+y", "+z").T)
+    return mesh
+
+
 def _keep_box(mesh: trimesh.Trimesh, lower: np.ndarray, upper: np.ndarray) -> trimesh.Trimesh:
     """The part of `mesh` inside an axis-aligned box, closed where it was cut."""
     box = trimesh.creation.box(bounds=[lower, upper])

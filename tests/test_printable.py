@@ -73,3 +73,15 @@ def test_non_watertight_mesh_is_still_cut():
     assert not raw.is_volume
     out = make_printable(raw, PrintOptions(height_mm=80, flat_back=0.1, flat_bottom=0.05))
     assert np.isclose(out.extents[2], 80)
+
+
+def test_gltf_preview_axes():
+    from img2mesh.printable import to_gltf_axes
+
+    out = make_printable(raw_bust(), PrintOptions(height_mm=100))
+    preview = to_gltf_axes(out)
+    # Height goes back to +Y, and the nose (frontmost) points to +Z, like the raw model.
+    assert np.isclose(preview.extents[1], 100)
+    nose = preview.vertices[preview.vertices[:, 2].argmax()]
+    assert 60 < nose[1] < 90
+    assert np.isclose(np.linalg.det(orientation("+y", "+z")[:3, :3].T), 1)  # still no mirror

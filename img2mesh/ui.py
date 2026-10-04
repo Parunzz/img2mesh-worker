@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import tempfile
 from pathlib import Path
 
+import trimesh
+
 from .pipeline import GenerateOptions, Img2Mesh
-from .printable import PrintOptions
+from .printable import PrintOptions, to_gltf_axes
 
 AXES = ["+x", "-x", "+y", "-y", "+z", "-z"]
 
@@ -30,10 +33,14 @@ def launch(host: str = "0.0.0.0", port: int = 7860) -> None:
         stl, stats = engine.to_stl(image, generate, printable, on_progress=lambda s, t: progress(s / t, desc="Generating shape"))
         path = out_dir / f"img2mesh-seed{int(seed)}.stl"
         path.write_bytes(stl)
-        return str(path), str(path), stats
+        # The viewer gets a GLB: it shows STL files mirrored. The download stays STL.
+        preview = out_dir / f"img2mesh-seed{int(seed)}-preview.glb"
+        mesh = trimesh.load(io.BytesIO(stl), file_type="stl")
+        preview.write_bytes(to_gltf_axes(mesh).export(file_type="glb"))
+        return str(preview), str(path), stats
 
     with gr.Blocks(title="img2mesh") as page:
-        gr.Markdown("## img2mesh — photo to printable STL\nCreated with Hunyuan 3D-2.1")
+        gr.Markdown("## img2mesh — photo to printable STL\nPowered by Tencent Hunyuan")
         with gr.Row():
             with gr.Column():
                 image = gr.Image(type="pil", image_mode="RGBA", label="Image (PNG with transparency, or a photo)")
@@ -49,7 +56,7 @@ def launch(host: str = "0.0.0.0", port: int = 7860) -> None:
                     front = gr.Dropdown(AXES, value="+z", label="Raw front axis")
                 button = gr.Button("Generate", variant="primary")
             with gr.Column():
-                model = gr.Model3D(label="Result (mm, Z up, front faces -Y)")
+                model = gr.Model3D(label="Preview (the STL download is in mm, Z up, front facing -Y)")
                 file = gr.File(label="Download STL")
                 stats = gr.JSON(label="Stats")
         button.click(run, [image, height_mm, flat_back, flat_bottom, remove_background, seed, steps, octree, up, front], [model, file, stats])
