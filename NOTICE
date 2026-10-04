@@ -28,8 +28,11 @@ The image contains, unmodified:
 
 It downloads, on first start:
 - microsoft/TRELLIS.2-4B and microsoft/TRELLIS-image-large weights (MIT);
-- facebook/dinov3-vitl16-pretrain-lvd1689m, under Meta's DINOv3 License
-  (https://ai.meta.com/resources/models-and-libraries/dinov3-license), gated on Hugging Face.
+- Meta's DINOv3 ViT-L/16 image encoder, from Comfy-Org's ungated copy
+  (https://huggingface.co/Comfy-Org/TRELLIS.2, clip_vision/dino_v3_vit_l.safetensors) unless a
+  local copy is supplied. Its weights remain under Meta's DINOv3 License
+  (https://ai.meta.com/resources/models-and-libraries/dinov3-license).
+  img2mesh/dinov3-vitl16-config.json was generated with transformers' DINOv3ViTConfig.
 
 Not included and not used: briaai/RMBG-2.0 (TRELLIS.2's default background remover,
 licensed CC BY-NC 4.0) and NVIDIA nvdiffrast (non-commercial licence); a stub stands

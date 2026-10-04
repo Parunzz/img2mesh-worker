@@ -9,7 +9,7 @@ Two engines, picked with `ENGINE` in `.env`; each has its own Docker image:
 | `ENGINE` | Model | Licence | Notes |
 |---|---|---|---|
 | `hunyuan` (default) | [Tencent Hunyuan3D 2.1](https://huggingface.co/tencent/Hunyuan3D-2.1) | Tencent community licence (not EU/UK/South Korea) | Reads the image at 518 px. Can reuse ComfyUI's file. |
-| `trellis2` | [Microsoft TRELLIS.2-4B](https://huggingface.co/microsoft/TRELLIS.2-4B) | MIT (+ Meta DINOv3 licence for its image encoder) | Reads the image at 1024 px: more face detail. Needs a Hugging Face token once. |
+| `trellis2` | [Microsoft TRELLIS.2-4B](https://huggingface.co/microsoft/TRELLIS.2-4B) | MIT (+ Meta DINOv3 licence for its image encoder) | Reads the image at 1024 px: more face detail. No account or token needed. |
 
 Three ways to use the same image:
 
@@ -70,19 +70,21 @@ A Hugging Face *cache* snapshot (`models--tencent--Hunyuan3D-2.1/snapshots/...`)
 ### TRELLIS.2 setup
 
 1. In `.env`: `ENGINE=trellis2`, then `docker compose pull` (a separate image).
-2. Its image encoder, Meta's DINOv3, is gated. Once: open https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m , request access (wait for approval), create a **read** token at https://huggingface.co/settings/tokens and add `HF_TOKEN=hf_...` to `.env`.
-3. First start downloads about 9 GB into `models/trellis2` (or `TRELLIS_DIR`): only the shape models, not the texture ones.
+2. First start downloads about 9 GB into `models/trellis2` (or `TRELLIS_DIR`): only the shape models, not the texture ones, plus the 1.2 GB DINOv3 image encoder. Everything runs on your PC; no Hugging Face account or token is needed.
+3. Already have ComfyUI's TRELLIS.2 or Pixal3D setup? Reuse its DINOv3 file instead of downloading it: `COMFYUI_CLIP_VISION=C:/AI/ComfyUI/models/clip_vision` (the folder with `dino_v3_vit_l.safetensors` or `dino_v3_L_naf_fp32.safetensors`; both hold the same DINOv3 weights).
 
-Already have the weights? Arrange them in one folder and set `TRELLIS_DIR` to it:
+Meta's own DINOv3 repo is gated, so the worker uses Comfy-Org's ungated copy; its tensors match `transformers`' DINOv3 ViT-L/16 exactly, and the worker checks the file before loading it. The DINOv3 License still applies to those weights.
+
+Already have the TRELLIS.2 weights? Arrange them in one folder and set `TRELLIS_DIR` to it:
 
 ```
 TRELLIS_DIR/
   TRELLIS.2-4B/                     pipeline.json, ckpts/ (from microsoft/TRELLIS.2-4B)
   TRELLIS-image-large/ckpts/        ss_dec_conv3d_16l8_fp16.json + .safetensors
-  dinov3-vitl16-pretrain-lvd1689m/  config.json, model.safetensors (Hugging Face format)
+  dinov3/                           optional: config.json + model.safetensors (Hugging Face format)
 ```
 
-ComfyUI's TRELLIS.2 files (`trellis_2_int8_convrot.safetensors`, `dino_v3_L_naf_fp32.safetensors`) are a different, quantised format and can't be used here.
+ComfyUI's TRELLIS.2 *model* file (`trellis_2_int8_convrot.safetensors`) is a quantised format for ComfyUI's own code and can't be used here; its DINOv3 file can (step 3).
 
 TRELLIS.2 is officially tested on 24 GB GPUs. The worker runs it in low-VRAM mode (models move to system RAM between steps), so 16 GB cards may work at **Detail 1024**; if you run out of memory, use **512**.
 
@@ -166,7 +168,7 @@ docker run --rm -v "$PWD":/app -w /app python:3.10-slim sh -c "pip install -r re
    cd img2mesh-worker
    docker compose pull
    ```
-   เลือกโมเดลด้วย `ENGINE=` ใน `.env`: `hunyuan` (ค่าเริ่มต้น) หรือ `trellis2` (หน้าคนละเอียดกว่า ต้องใส่ `HF_TOKEN` ครั้งแรก ดูหัวข้อ TRELLIS.2 setup ด้านบน) เปลี่ยนแล้วรัน `docker compose pull` ใหม่
+   เลือกโมเดลด้วย `ENGINE=` ใน `.env`: `hunyuan` (ค่าเริ่มต้น) หรือ `trellis2` (หน้าคนละเอียดกว่า ไม่ต้องมีบัญชีหรือ token) เปลี่ยนแล้วรัน `docker compose pull` ใหม่ ถ้ามี ComfyUI อยู่แล้วใส่ `COMFYUI_CLIP_VISION=C:/AI/ComfyUI/models/clip_vision` เพื่อใช้ไฟล์ DINOv3 เดิม ไม่ต้องโหลดใหม่
    ถ้ามี Hunyuan3D-2.1 อยู่ในเครื่องแล้ว ไม่ต้องโหลดใหม่: ก๊อป `.env.example` เป็น `.env` แล้วใส่
    - ไฟล์จาก ComfyUI (`hunyuan_3d_v2.1.safetensors`): `COMFYUI_CHECKPOINTS=C:/AI/ComfyUI/models/checkpoints`
    - หรือแบบของ Tencent: `HUNYUAN_DIR=` เป็นโฟลเดอร์ที่มี `hunyuan3d-dit-v2-1` อยู่ข้างใน

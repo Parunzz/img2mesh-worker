@@ -8,9 +8,18 @@ All weights live under TRELLIS_ROOT (mounted from TRELLIS_DIR):
 
     TRELLIS.2-4B/                    pipeline.json + ckpts/  (microsoft/TRELLIS.2-4B)
     TRELLIS-image-large/ckpts/       ss_dec_conv3d_16l8_fp16.*  (microsoft/TRELLIS-image-large)
-    dinov3-vitl16-pretrain-lvd1689m/ (facebook/..., gated: needs HF_TOKEN to download)
+    dinov3/                          DINOv3 ViT-L image encoder (see below)
 
-Anything missing is downloaded there once.
+Anything missing is downloaded there once; no account or token is needed.
+
+DINOv3 (Meta's image encoder) comes from, in order: an HF-format folder already in
+TRELLIS_ROOT/dinov3 (config.json + model.safetensors); a ComfyUI clip_vision file
+mounted at /clip_vision (dino_v3_vit_l.safetensors, or dino_v3_L_naf_fp32.safetensors,
+which holds the same weights plus an add-on that is ignored); else a download of
+Comfy-Org's ungated copy. Meta's own repo is gated, which is why it is not used.
+The tensors of these files match transformers' DINOv3ViTModel name for name and
+shape for shape; the config (img2mesh/dinov3-vitl16-config.json) supplies what the
+single files lack.
 """
 
 from __future__ import annotations
@@ -31,7 +40,18 @@ log = logging.getLogger("img2mesh")
 
 ROOT = Path(os.environ.get("TRELLIS_ROOT", "/models/trellis2"))
 MAIN_REPO = "microsoft/TRELLIS.2-4B"
-DINO_REPO = "facebook/dinov3-vitl16-pretrain-lvd1689m"
+DINO_REPO = "Comfy-Org/TRELLIS.2"  # ungated copy of DINOv3 ViT-L/16
+DINO_FILE_IN_REPO = "clip_vision/dino_v3_vit_l.safetensors"
+DINO_CONFIG = Path(__file__).resolve().parent.parent / "dinov3-vitl16-config.json"
+CLIP_VISION = Path(os.environ.get("CLIP_VISION_DIR", "/clip_vision"))
+DINO_FILE_NAMES = ("dino_v3_vit_l.safetensors", "dino_v3_L_naf_fp32.safetensors")
+# A few tensors any DINOv3 ViT-L file must have, to refuse a wrong file early
+# (a missing tensor would otherwise be silently random-initialised).
+DINO_REQUIRED = {
+    "embeddings.patch_embeddings.weight": [1024, 3, 16, 16],
+    "layer.23.mlp.up_proj.weight": [4096, 1024],
+    "norm.weight": [1024],
+}
 SHAPE_MODELS = (
     "sparse_structure_flow_model",
     "sparse_structure_decoder",
@@ -54,16 +74,51 @@ def local_path(repo_path: str) -> Path:
 
 def _download(repo: str, folder: Path, patterns: list[str]) -> None:
     from huggingface_hub import snapshot_download
-    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 
     log.info("downloading %s (%s) into %s", repo, ", ".join(patterns), folder)
-    try:
-        snapshot_download(repo, local_dir=folder, allow_patterns=patterns)
-    except (GatedRepoError, RepositoryNotFoundError) as error:
-        raise RuntimeError(
-            f"{repo} is gated. Request access on https://huggingface.co/{repo}, then put a "
-            f"Hugging Face token in .env as HF_TOKEN=..., or copy the model into {folder}."
-        ) from error
+    snapshot_download(repo, local_dir=folder, allow_patterns=patterns)
+
+
+def check_dino_file(path: Path) -> None:
+    """Refuse a file that is not a DINOv3 ViT-L/16 checkpoint."""
+    from safetensors import safe_open
+
+    with safe_open(str(path), framework="numpy") as f:
+        keys = set(f.keys())
+        for name, shape in DINO_REQUIRED.items():
+            if name not in keys or list(f.get_slice(name).get_shape()) != shape:
+                raise RuntimeError(f"{path} is not a DINOv3 ViT-L/16 checkpoint (no {name} {shape})")
+
+
+def find_dino_file() -> Path | None:
+    wanted = os.environ.get("DINOV3_FILE")
+    for name in ([wanted] if wanted else DINO_FILE_NAMES):
+        path = CLIP_VISION / name
+        if path.is_file():
+            return path
+    return None
+
+
+def ensure_dino() -> Path:
+    """An HF-format folder (config.json + model.safetensors) for DinoV3FeatureExtractor."""
+    folder = ROOT / "dinov3"
+    if (folder / "config.json").is_file() and any(folder.glob("*.safetensors")):
+        return folder
+    source = find_dino_file()
+    if source is None:
+        _download(DINO_REPO, folder, [DINO_FILE_IN_REPO])
+        source = folder / DINO_FILE_IN_REPO
+    log.info("DINOv3 image encoder from %s", source)
+    check_dino_file(source)
+    # A small view folder: our config plus a link to the weights file, so nothing large is copied.
+    view = Path(os.environ.get("HF_HOME", "/tmp")) / "img2mesh-dinov3"
+    view.mkdir(parents=True, exist_ok=True)
+    (view / "config.json").write_text(DINO_CONFIG.read_text())
+    link = view / "model.safetensors"
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to(source)
+    return view
 
 
 def ensure_weights() -> dict:
@@ -79,9 +134,6 @@ def ensure_weights() -> dict:
             parts = repo_path.split("/")
             repo, inner = (MAIN_REPO, repo_path) if parts[0] == "ckpts" else ("/".join(parts[:2]), "/".join(parts[2:]))
             _download(repo, path.parents[len(Path(inner).parts) - 1], [f"{inner}.json", f"{inner}.safetensors"])
-    dino = ROOT / DINO_REPO.split("/")[1]
-    if not (dino / "config.json").is_file():
-        _download(DINO_REPO, dino, ["*.json", "*.safetensors"])
     return args
 
 
@@ -117,6 +169,7 @@ class Trellis2Engine(Engine):
         from trellis2.pipelines import Trellis2ImageTo3DPipeline, samplers
 
         args = ensure_weights()
+        dino = ensure_dino()
         loaded = {}
         for name in SHAPE_MODELS:
             log.info("loading %s", name)
@@ -127,7 +180,7 @@ class Trellis2Engine(Engine):
             setattr(pipeline, f"{stage}_sampler", getattr(samplers, spec["name"])(**spec["args"]))
             setattr(pipeline, f"{stage}_sampler_params", spec["params"])
         pipeline.shape_slat_normalization = args["shape_slat_normalization"]
-        pipeline.image_cond_model = image_feature_extractor.DinoV3FeatureExtractor(model_name=str(ROOT / DINO_REPO.split("/")[1]))
+        pipeline.image_cond_model = image_feature_extractor.DinoV3FeatureExtractor(model_name=str(dino))
         pipeline.rembg_model = None  # never used: images arrive with transparency
         pipeline.to(torch.device("cuda"))
         self.pipeline = pipeline

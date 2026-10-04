@@ -17,8 +17,10 @@ x-gpu-service: &gpu-service
     # Or a ComfyUI checkpoints folder holding hunyuan_3d_v2.1.safetensors: set
     # COMFYUI_CHECKPOINTS in .env. When that file is there, it is used instead.
     - ${COMFYUI_CHECKPOINTS:-./models/checkpoints}:/checkpoints:ro
-    # TRELLIS.2 weights (TRELLIS.2-4B/, TRELLIS-image-large/, dinov3-vitl16-pretrain-lvd1689m/).
+    # TRELLIS.2 weights (TRELLIS.2-4B/, TRELLIS-image-large/, dinov3/).
     - ${TRELLIS_DIR:-./models/trellis2}:/models/trellis2
+    # Optional: ComfyUI's clip_vision folder, to reuse its DINOv3 file instead of downloading.
+    - ${COMFYUI_CLIP_VISION:-./models/clip_vision}:/clip_vision:ro
     - cache:/models    # background-removal model and other small caches
     - ./data:/data     # your images in, STL files out (for `generate`)
   deploy:

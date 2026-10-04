@@ -93,3 +93,59 @@ def test_trellis_weight_paths(monkeypatch, tmp_path):
     t = importlib.reload(t)
     assert t.local_path("ckpts/shape_dec_next_dc_f16c32_fp16") == tmp_path / "TRELLIS.2-4B/ckpts/shape_dec_next_dc_f16c32_fp16"
     assert t.local_path("microsoft/TRELLIS-image-large/ckpts/ss_dec_conv3d_16l8_fp16") == tmp_path / "TRELLIS-image-large/ckpts/ss_dec_conv3d_16l8_fp16"
+
+
+def _fake_dino(path, extra=None, patch_shape=(1024, 3, 16, 16)):
+    from safetensors.numpy import save_file
+
+    tensors = {
+        "embeddings.patch_embeddings.weight": np.zeros(patch_shape, dtype=np.float16),
+        "layer.23.mlp.up_proj.weight": np.zeros((4096, 1024), dtype=np.float16),
+        "norm.weight": np.zeros(1024, dtype=np.float16),
+        **(extra or {}),
+    }
+    save_file(tensors, str(path))
+
+
+def test_dino_check_accepts_vit_l_with_extra_tensors(tmp_path):
+    from img2mesh.engines.trellis2 import check_dino_file
+
+    path = tmp_path / "dino_v3_L_naf_fp32.safetensors"
+    _fake_dino(path, extra={"naf.image_encoder.encoder.0.bias": np.zeros(8, dtype=np.float16)})
+    check_dino_file(path)  # the naf add-on is ignored
+
+
+def test_dino_check_refuses_other_models(tmp_path):
+    from img2mesh.engines.trellis2 import check_dino_file
+
+    path = tmp_path / "dino_small.safetensors"
+    _fake_dino(path, patch_shape=(384, 3, 16, 16))  # ViT-S, not ViT-L
+    with pytest.raises(RuntimeError, match="not a DINOv3 ViT-L/16"):
+        check_dino_file(path)
+
+
+def test_dino_file_lookup_prefers_plain_then_naf(tmp_path, monkeypatch):
+    import importlib
+
+    monkeypatch.setenv("CLIP_VISION_DIR", str(tmp_path))
+    monkeypatch.delenv("DINOV3_FILE", raising=False)
+    import img2mesh.engines.trellis2 as t
+
+    t = importlib.reload(t)
+    assert t.find_dino_file() is None
+    (tmp_path / "dino_v3_L_naf_fp32.safetensors").write_bytes(b"x")
+    assert t.find_dino_file().name == "dino_v3_L_naf_fp32.safetensors"
+    (tmp_path / "dino_v3_vit_l.safetensors").write_bytes(b"x")
+    assert t.find_dino_file().name == "dino_v3_vit_l.safetensors"
+    monkeypatch.setenv("DINOV3_FILE", "mine.safetensors")
+    assert t.find_dino_file() is None
+
+
+def test_bundled_dino_config_is_vit_l16():
+    import json
+
+    from img2mesh.engines.trellis2 import DINO_CONFIG
+
+    config = json.loads(DINO_CONFIG.read_text())
+    assert config["model_type"] == "dinov3_vit"
+    assert (config["hidden_size"], config["num_hidden_layers"], config["patch_size"], config["num_register_tokens"]) == (1024, 24, 16, 4)
