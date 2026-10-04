@@ -1,0 +1,5 @@
+# CPU-only: geometry, protocol and serve-loop tests. No torch, no GPU.
+numpy<2
+trimesh[easy]==4.4.7
+pillow
+pytest

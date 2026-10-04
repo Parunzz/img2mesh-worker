@@ -1,0 +1,27 @@
+# Installed after torch (see Dockerfile). Pins follow Hunyuan3D-2.1's own
+# requirements where they matter; torch itself is newer (cu128) for RTX 50xx.
+transformers==4.46.0
+diffusers==0.30.0
+accelerate==1.1.1
+huggingface-hub==0.30.2
+safetensors==0.4.4
+numpy==1.26.4
+scipy==1.14.1
+einops==0.8.0
+omegaconf==2.3.0
+pyyaml==6.0.2
+tqdm==4.66.5
+timm==1.0.15
+torchdiffeq==0.2.5
+pytorch-lightning==1.9.5
+opencv-python-headless==4.10.0.84
+scikit-image==0.24.0
+pillow==11.2.1
+# background removal (CPU onnxruntime: small and fast enough for one image)
+rembg==2.0.65
+onnxruntime==1.20.1
+# mesh clean-up and printable geometry
+pymeshlab==2022.2.post3
+trimesh[easy]==4.4.7
+# test page
+gradio==5.33.0

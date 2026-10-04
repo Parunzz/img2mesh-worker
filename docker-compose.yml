@@ -1,0 +1,36 @@
+name: img2mesh
+
+x-gpu-service: &gpu-service
+  image: ghcr.io/parunzz/img2mesh-worker:latest
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - models:/models   # model weights, downloaded once (several GB)
+    - ./data:/data     # your images in, STL files out (for `generate`)
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+
+services:
+  # Pulls jobs from SITE_URL and keeps running across reboots.
+  worker:
+    <<: *gpu-service
+    command: serve
+    restart: unless-stopped
+
+  # Test page at http://localhost:7860. Start with: docker compose --profile ui up ui
+  ui:
+    <<: *gpu-service
+    command: ui
+    ports:
+      - "7860:7860"
+    profiles: [ui]
+
+volumes:
+  models:
