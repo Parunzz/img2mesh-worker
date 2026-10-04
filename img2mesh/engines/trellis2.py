@@ -137,6 +137,20 @@ def ensure_weights() -> dict:
     return args
 
 
+def keep_flash_attention_3_on_hopper_only() -> None:
+    """xformers 0.0.31 enables FlashAttention-3 for every GPU with compute
+    capability >= 9.0, but its FA3 kernels are built for Hopper (9.0a) only. On an
+    RTX 50xx (12.0) that crashes with 'flash_fwd_launch_template.h: invalid
+    argument'. Elsewhere xformers falls back to PyTorch's memory-efficient
+    attention (cutlassF-pt), which PyTorch builds for these GPUs."""
+    import torch
+    from xformers.ops.fmha import dispatch
+
+    major = torch.cuda.get_device_capability()[0] if torch.cuda.is_available() else 0
+    dispatch._set_use_fa3(major == 9)
+    log.info("xformers FlashAttention-3: %s (compute capability %s.x)", "on" if major == 9 else "off", major)
+
+
 def crop_like_trellis(image: Image.Image) -> Image.Image:
     """TRELLIS.2's own preprocessing for an RGBA image: square crop around the
     subject, background multiplied to black, at most 1024 px."""
@@ -168,6 +182,7 @@ class Trellis2Engine(Engine):
         from trellis2.modules import image_feature_extractor
         from trellis2.pipelines import Trellis2ImageTo3DPipeline, samplers
 
+        keep_flash_attention_3_on_hopper_only()
         args = ensure_weights()
         dino = ensure_dino()
         loaded = {}
