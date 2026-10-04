@@ -37,8 +37,10 @@ RUN cp -r TRELLIS.2/trellis2 /trellis2 && cp TRELLIS.2/LICENSE /trellis2/LICENSE
 FROM python:3.10-slim-bookworm
 ARG TORCH TORCHVISION XFORMERS TORCH_INDEX
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_ROOT_USER_ACTION=ignore PIP_DISABLE_PIP_VERSION_CHECK=1
+# gcc + libc headers: Triton (used by FlexGEMM) compiles a small C helper and
+# its GPU kernels on first use, at runtime, on the machine with the GPU.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgomp1 \
+ && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgomp1 gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
 RUN pip install --upgrade pip \
  && pip install torch==${TORCH} torchvision==${TORCHVISION} xformers==${XFORMERS} --index-url ${TORCH_INDEX}
@@ -54,6 +56,8 @@ ENV ENGINE=trellis2 \
     ATTN_BACKEND=xformers \
     SPARSE_ATTN_BACKEND=xformers \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    TRITON_CACHE_DIR=/models/triton-cache \
+    FLEX_GEMM_AUTOTUNE_CACHE_PATH=/models/flex_gemm/autotune_cache.json \
     PYTHONPATH=/opt/trellis2:/opt/stubs:/app \
     TRELLIS_ROOT=/models/trellis2 \
     HF_HOME=/models/huggingface \
