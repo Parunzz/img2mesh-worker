@@ -6,17 +6,31 @@ load (and test) on machines without torch or a GPU.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import trimesh
 from PIL import Image
 
 from .printable import PrintOptions, make_printable
 
+log = logging.getLogger("img2mesh")
+
 MODEL = os.environ.get("HUNYUAN_MODEL", "tencent/Hunyuan3D-2.1")
 REMBG_MODEL = os.environ.get("REMBG_MODEL", "u2net")
+# Hunyuan's own config for the 2.1 shape model, for single-file checkpoints
+# (such as ComfyUI's hunyuan_3d_v2.1.safetensors) that don't carry one.
+SINGLE_FILE_CONFIG = Path(__file__).with_name("hunyuan3d-dit-v2-1.yaml")
+
+
+def single_file_checkpoint() -> Path | None:
+    """A single-file checkpoint mounted at CHECKPOINT_DIR, if there is one."""
+    folder = Path(os.environ.get("CHECKPOINT_DIR", "/checkpoints"))
+    path = folder / os.environ.get("HUNYUAN_CHECKPOINT", "hunyuan_3d_v2.1.safetensors")
+    return path if path.is_file() else None
 
 
 @dataclass(frozen=True)
@@ -58,7 +72,14 @@ class Img2Mesh:
         from hy3dshape import DegenerateFaceRemover, FaceReducer, FloaterRemover
         from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
 
-        self.shape = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(MODEL)
+        checkpoint = single_file_checkpoint()
+        if checkpoint:
+            log.info("loading shape model from %s", checkpoint)
+            self.shape = Hunyuan3DDiTFlowMatchingPipeline.from_single_file(
+                str(checkpoint), str(SINGLE_FILE_CONFIG), use_safetensors=checkpoint.suffix == ".safetensors"
+            )
+        else:
+            self.shape = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(MODEL)
         self.rembg_session = new_session(REMBG_MODEL)
         self.remove_floaters = FloaterRemover()
         self.remove_degenerate = DegenerateFaceRemover()

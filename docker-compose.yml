@@ -11,6 +11,9 @@ x-gpu-service: &gpu-service
     # have (the folder that contains hunyuan3d-dit-v2-1/); otherwise they are
     # downloaded once into ./models/Hunyuan3D-2.1.
     - ${HUNYUAN_DIR:-./models/Hunyuan3D-2.1}:/models/hy3dgen/tencent/Hunyuan3D-2.1
+    # Or a ComfyUI checkpoints folder holding hunyuan_3d_v2.1.safetensors: set
+    # COMFYUI_CHECKPOINTS in .env. When that file is there, it is used instead.
+    - ${COMFYUI_CHECKPOINTS:-./models/checkpoints}:/checkpoints:ro
     - cache:/models    # background-removal model and other small caches
     - ./data:/data     # your images in, STL files out (for `generate`)
   deploy:
