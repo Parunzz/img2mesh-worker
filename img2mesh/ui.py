@@ -59,6 +59,14 @@ def launch(host: str = "0.0.0.0", port: int = 7860) -> None:
                 model = gr.Model3D(label="Preview (the STL download is in mm, Z up, front facing -Y)")
                 file = gr.File(label="Download STL")
                 stats = gr.JSON(label="Stats")
-        button.click(run, [image, height_mm, flat_back, flat_bottom, remove_background, seed, steps, octree, up, front], [model, file, stats])
+        # Lock the button while a job runs so a second click can't queue another
+        # few-minute GPU job; `.then` re-enables it even when the job fails.
+        button.click(
+            lambda: gr.update(value="Generating… (a few minutes)", interactive=False), None, button, queue=False, trigger_mode="once"
+        ).then(
+            run, [image, height_mm, flat_back, flat_bottom, remove_background, seed, steps, octree, up, front], [model, file, stats], concurrency_limit=1
+        ).then(
+            lambda: gr.update(value="Generate", interactive=True), None, button, queue=False
+        )
 
     page.queue(max_size=4).launch(server_name=host, server_port=port)
