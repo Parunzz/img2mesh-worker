@@ -13,7 +13,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # CUDA 12.8 build: required for RTX 50xx (Blackwell, sm_120), fine for older cards.
-RUN pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
+# A current pip is needed: older ones reject some PyTorch-index wheels over name case.
+RUN pip install --upgrade pip \
+ && pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
