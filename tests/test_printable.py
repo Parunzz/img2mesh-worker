@@ -107,12 +107,30 @@ def test_holed_mesh_still_prints_at_height():
     assert np.isclose(out.extents[2], 120)
 
 
-def test_repair_does_not_cap_a_big_hole_with_a_flat_fan():
-    pytest.importorskip("pymeshlab")
+def test_repair_closes_a_small_hole_into_a_solid(monkeypatch):
+    import img2mesh.printable as printable
     from img2mesh.printable import repair
 
-    sphere = trimesh.creation.icosphere(subdivisions=5)  # ~160-edge rim, over MAX_HOLE_EDGES
-    sphere.update_faces(sphere.triangles_center[:, 2] < 0)  # cut away the top half
+    monkeypatch.setattr(printable, "VOXELS", 64)  # keep the test fast
+
+    sphere = trimesh.creation.icosphere(subdivisions=4)
+    sphere.update_faces(np.arange(len(sphere.faces)) >= 6)  # a small hole
     sphere.remove_unreferenced_vertices()
     out = repair(sphere)
-    assert out.area_faces.max() < 10 * sphere.area_faces.max()
+    assert out.is_watertight and out.is_winding_consistent
+    assert np.isclose(out.volume, 4 / 3 * np.pi, rtol=0.05)
+
+
+def test_repair_closes_inside_out_patches_and_a_big_hole(monkeypatch):
+    import img2mesh.printable as printable
+    from img2mesh.printable import repair
+
+    monkeypatch.setattr(printable, "VOXELS", 64)
+
+    sphere = trimesh.creation.icosphere(subdivisions=4)
+    sphere.update_faces(sphere.triangles_center[:, 2] < 0.5)  # open top
+    sphere.remove_unreferenced_vertices()
+    flipped = sphere.triangles_center[:, 0] > 0.3
+    sphere.faces = np.where(flipped[:, None], sphere.faces[:, ::-1], sphere.faces)
+    out = repair(sphere)
+    assert out.is_watertight and out.volume > 0

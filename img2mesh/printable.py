@@ -72,43 +72,72 @@ def to_gltf_axes(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     return mesh
 
 
-# Holes up to this many boundary edges are closed. Bigger ones stay open: MeshLab
-# fills them with flat fans that cut through the model (TRELLIS.2's gaps did).
-MAX_HOLE_EDGES = 100
-# Loose pieces smaller than this share of the model's diagonal are dropped.
-MIN_PART_DIAGONAL = 5  # percent
+# A mesh with holes is rebuilt in a voxel grid this many cells along its longest
+# side (about 0.3 mm at 150 mm, TRELLIS.2's own 512 resolution).
+# ponytail: one fixed grid; raise it (memory grows with the cube) for Detail 1024.
+VOXELS = 512
+# Cracks up to about twice this many voxels wide are closed.
+CLOSE_VOXELS = 2
+SMOOTH = 1.0  # voxels
+SURFACE_LEVEL = 0.84  # standard normal CDF at 1 / SMOOTH
 
 
 def repair(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
-    """Tidy a generated mesh so it can be cut cleanly and printed.
+    """A closed (watertight, outward-facing) version of a generated mesh.
 
-    Watertight meshes (Hunyuan's usually are) pass through unchanged. Otherwise
-    MeshLab removes duplicate and non-manifold geometry and small loose pieces,
-    and closes the small holes. Without pymeshlab installed, trimesh's simpler
-    hole filler is used.
+    Watertight meshes (Hunyuan's usually are) pass through unchanged. Others
+    (TRELLIS.2's have holes, cracks and inside-out patches, which show as dark
+    areas and confuse slicers) are rebuilt as a solid: the surface is drawn
+    into a voxel grid, small cracks are closed, the inside is filled, and the
+    outside surface is traced again with marching cubes. A hole too big to
+    close leaves a thin closed shell there instead of an opening.
     """
     mesh = mesh.copy()
     mesh.merge_vertices()
     if mesh.is_watertight:
         return mesh
+    return _simplify(_rebuild(mesh), len(mesh.faces))
+
+
+def _rebuild(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    from scipy import ndimage
+    from skimage.measure import marching_cubes
+
+    pitch = mesh.extents.max() / VOXELS
+    pad = CLOSE_VOXELS + 2
+    origin = mesh.bounds[0] - pad * pitch
+    shape = np.ceil(mesh.extents / pitch).astype(int) + 2 * pad + 1
+    # About 8 samples per voxel face of surface, plus every vertex.
+    count = int(min(mesh.area / pitch**2 * 8, 30_000_000))
+    points = np.vstack([trimesh.sample.sample_surface(mesh, count, seed=0)[0], mesh.vertices])
+    solid = np.zeros(shape, dtype=bool)
+    solid[tuple(((points - origin) / pitch).astype(int).T)] = True
+    solid = ndimage.binary_dilation(solid, iterations=CLOSE_VOXELS)
+    solid = ndimage.binary_fill_holes(solid)
+    # Erode one voxel less than dilated so a sheet left by a hole too big to close
+    # stays 3 voxels thick; blur away the voxel steps, then trace the surface one
+    # voxel in (the blurred value of a flat side, one voxel inside, is Phi(1/SMOOTH)).
+    solid = ndimage.binary_erosion(solid, iterations=CLOSE_VOXELS - 1)
+    field = ndimage.gaussian_filter(solid.astype(np.float32), SMOOTH)
+    vertices, faces, _, _ = marching_cubes(field, SURFACE_LEVEL)
+    out = trimesh.Trimesh(vertices * pitch + origin, faces)
+    if out.volume < 0:
+        out.invert()
+    return out
+
+
+def _simplify(mesh: trimesh.Trimesh, target_faces: int) -> trimesh.Trimesh:
+    """Cut the rebuilt mesh to about `target_faces`, keeping it closed, and smooth
+    away the voxel steps. Left as is without pymeshlab (tests)."""
     try:
         import pymeshlab
     except ImportError:
-        trimesh.repair.fill_holes(mesh)
         return mesh
     ms = pymeshlab.MeshSet()
     ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(mesh.vertices, dtype=np.float64), face_matrix=np.asarray(mesh.faces, dtype=np.int32)))
-    ms.meshing_remove_duplicate_vertices()
-    ms.meshing_remove_duplicate_faces()
-    ms.meshing_remove_null_faces()
-    ms.meshing_remove_connected_component_by_diameter(mincomponentdiag=pymeshlab.Percentage(MIN_PART_DIAGONAL))
-    # Hole filling needs manifold edges.
-    ms.meshing_repair_non_manifold_edges()
-    ms.meshing_repair_non_manifold_vertices()
-    try:
-        ms.meshing_close_holes(maxholesize=MAX_HOLE_EDGES)
-    except pymeshlab.PyMeshLabException:
-        pass  # leave the holes; the cut falls back to plane slicing and capping
+    ms.apply_coord_taubin_smoothing(stepsmoothnum=10)
+    if len(mesh.faces) > target_faces:
+        ms.meshing_decimation_quadric_edge_collapse(targetfacenum=target_faces, preservetopology=True, preservenormal=True)
     out = trimesh.Trimesh(ms.current_mesh().vertex_matrix(), ms.current_mesh().face_matrix(), process=True)
     trimesh.repair.fix_normals(out)
     return out
