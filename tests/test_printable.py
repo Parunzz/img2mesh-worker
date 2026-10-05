@@ -105,3 +105,14 @@ def test_repair_leaves_watertight_mesh_alone():
 def test_holed_mesh_still_prints_at_height():
     out = make_printable(holed_bust(), PrintOptions(height_mm=120, flat_back=0.1, flat_bottom=0.05))
     assert np.isclose(out.extents[2], 120)
+
+
+def test_repair_does_not_cap_a_big_hole_with_a_flat_fan():
+    pytest.importorskip("pymeshlab")
+    from img2mesh.printable import repair
+
+    sphere = trimesh.creation.icosphere(subdivisions=5)  # ~160-edge rim, over MAX_HOLE_EDGES
+    sphere.update_faces(sphere.triangles_center[:, 2] < 0)  # cut away the top half
+    sphere.remove_unreferenced_vertices()
+    out = repair(sphere)
+    assert out.area_faces.max() < 10 * sphere.area_faces.max()

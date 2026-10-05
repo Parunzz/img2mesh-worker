@@ -72,17 +72,20 @@ def to_gltf_axes(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     return mesh
 
 
-# Holes up to this many boundary edges are closed. Generated meshes can have
-# large openings (TRELLIS.2 leaves gaps its own small-hole filler skips).
-MAX_HOLE_EDGES = 5000
+# Holes up to this many boundary edges are closed. Bigger ones stay open: MeshLab
+# fills them with flat fans that cut through the model (TRELLIS.2's gaps did).
+MAX_HOLE_EDGES = 100
+# Loose pieces smaller than this share of the model's diagonal are dropped.
+MIN_PART_DIAGONAL = 5  # percent
 
 
 def repair(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
-    """Close a generated mesh so it can be cut cleanly and printed.
+    """Tidy a generated mesh so it can be cut cleanly and printed.
 
     Watertight meshes (Hunyuan's usually are) pass through unchanged. Otherwise
-    MeshLab removes duplicate and non-manifold geometry and closes the holes.
-    Without pymeshlab installed, trimesh's simpler hole filler is used.
+    MeshLab removes duplicate and non-manifold geometry and small loose pieces,
+    and closes the small holes. Without pymeshlab installed, trimesh's simpler
+    hole filler is used.
     """
     mesh = mesh.copy()
     mesh.merge_vertices()
@@ -98,21 +101,15 @@ def repair(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     ms.meshing_remove_duplicate_vertices()
     ms.meshing_remove_duplicate_faces()
     ms.meshing_remove_null_faces()
-
-    def close_holes(**kwargs) -> trimesh.Trimesh:
-        # Hole filling needs manifold edges, and a previous fill can leave new non-manifold ones.
-        ms.meshing_repair_non_manifold_edges()
-        ms.meshing_repair_non_manifold_vertices()
-        try:
-            ms.meshing_close_holes(maxholesize=MAX_HOLE_EDGES, **kwargs)
-        except pymeshlab.PyMeshLabException:
-            pass  # leave the holes; the cut falls back to plane slicing and capping
-        return trimesh.Trimesh(ms.current_mesh().vertex_matrix(), ms.current_mesh().face_matrix(), process=True)
-
-    out = close_holes()
-    if not out.is_watertight:
-        # A fill that would self-intersect is skipped by default; allow it for what is left.
-        out = close_holes(selfintersection=False)
+    ms.meshing_remove_connected_component_by_diameter(mincomponentdiag=pymeshlab.Percentage(MIN_PART_DIAGONAL))
+    # Hole filling needs manifold edges.
+    ms.meshing_repair_non_manifold_edges()
+    ms.meshing_repair_non_manifold_vertices()
+    try:
+        ms.meshing_close_holes(maxholesize=MAX_HOLE_EDGES)
+    except pymeshlab.PyMeshLabException:
+        pass  # leave the holes; the cut falls back to plane slicing and capping
+    out = trimesh.Trimesh(ms.current_mesh().vertex_matrix(), ms.current_mesh().face_matrix(), process=True)
     trimesh.repair.fix_normals(out)
     return out
 
