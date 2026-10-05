@@ -85,3 +85,23 @@ def test_gltf_preview_axes():
     nose = preview.vertices[preview.vertices[:, 2].argmax()]
     assert 60 < nose[1] < 90
     assert np.isclose(np.linalg.det(orientation("+y", "+z")[:3, :3].T), 1)  # still no mirror
+
+
+def holed_bust():
+    raw = raw_bust()
+    raw.update_faces(np.arange(len(raw.faces)) >= 40)  # tear a 40-triangle hole
+    raw.remove_unreferenced_vertices()
+    assert not raw.is_watertight
+    return raw
+
+
+def test_repair_leaves_watertight_mesh_alone():
+    from img2mesh.printable import repair
+
+    closed = trimesh.creation.icosphere()
+    assert len(repair(closed).faces) == len(closed.faces)
+
+
+def test_holed_mesh_still_prints_at_height():
+    out = make_printable(holed_bust(), PrintOptions(height_mm=120, flat_back=0.1, flat_bottom=0.05))
+    assert np.isclose(out.extents[2], 120)

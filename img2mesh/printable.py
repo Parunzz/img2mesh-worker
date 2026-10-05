@@ -72,6 +72,44 @@ def to_gltf_axes(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     return mesh
 
 
+# Holes up to this many boundary edges are closed. Generated meshes can have
+# large openings (TRELLIS.2 leaves gaps its own small-hole filler skips).
+MAX_HOLE_EDGES = 5000
+
+
+def repair(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Close a generated mesh so it can be cut cleanly and printed.
+
+    Watertight meshes (Hunyuan's usually are) pass through unchanged. Otherwise
+    MeshLab removes duplicate and non-manifold geometry and closes the holes.
+    Without pymeshlab installed, trimesh's simpler hole filler is used.
+    """
+    mesh = mesh.copy()
+    mesh.merge_vertices()
+    if mesh.is_watertight:
+        return mesh
+    try:
+        import pymeshlab
+    except ImportError:
+        trimesh.repair.fill_holes(mesh)
+        return mesh
+    ms = pymeshlab.MeshSet()
+    ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(mesh.vertices, dtype=np.float64), face_matrix=np.asarray(mesh.faces, dtype=np.int32)))
+    ms.meshing_remove_duplicate_vertices()
+    ms.meshing_remove_duplicate_faces()
+    ms.meshing_remove_null_faces()
+    ms.meshing_repair_non_manifold_edges()
+    ms.meshing_repair_non_manifold_vertices()
+    ms.meshing_close_holes(maxholesize=MAX_HOLE_EDGES)
+    out = trimesh.Trimesh(ms.current_mesh().vertex_matrix(), ms.current_mesh().face_matrix(), process=True)
+    if not out.is_watertight:
+        # A fill that would self-intersect is skipped by default; allow it for what is left.
+        ms.meshing_close_holes(maxholesize=MAX_HOLE_EDGES, selfintersection=False)
+        out = trimesh.Trimesh(ms.current_mesh().vertex_matrix(), ms.current_mesh().face_matrix(), process=True)
+    trimesh.repair.fix_normals(out)
+    return out
+
+
 def _keep_box(mesh: trimesh.Trimesh, lower: np.ndarray, upper: np.ndarray) -> trimesh.Trimesh:
     """The part of `mesh` inside an axis-aligned box, closed where it was cut."""
     box = trimesh.creation.box(bounds=[lower, upper])
@@ -93,8 +131,7 @@ def _keep_box(mesh: trimesh.Trimesh, lower: np.ndarray, upper: np.ndarray) -> tr
 
 def make_printable(mesh: trimesh.Trimesh, options: PrintOptions) -> trimesh.Trimesh:
     options.validate()
-    mesh = mesh.copy()
-    mesh.merge_vertices()
+    mesh = repair(mesh)
     mesh.apply_transform(orientation(*options.axes()))
 
     lo, hi = mesh.bounds

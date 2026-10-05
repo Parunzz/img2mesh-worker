@@ -135,3 +135,25 @@ def test_v1_octree_resolution_still_sets_detail():
 
     generate, _ = options_from(Job("1", "", "", {"height_mm": 120, "octree_resolution": 512}))
     assert generate.detail == 512
+
+
+def test_gpu_error_reports_failure_then_exits(monkeypatch):
+    exits = []
+    monkeypatch.setattr(serve_module.os, "_exit", lambda code: exits.append(code))
+
+    class BrokenGpu(FakeEngine):
+        def to_stl(self, *args, **kwargs):
+            raise RuntimeError("CUDA driver error: device not ready")
+
+    site = FakeSite({"height_mm": 150})
+    serve(lambda: BrokenGpu(), Client(site.url, SECRET, "pc-1"), once=True)
+    assert site.events[-1][1]["event"] == "failed"
+    assert exits == [3]
+
+
+def test_ordinary_error_does_not_exit(monkeypatch):
+    exits = []
+    monkeypatch.setattr(serve_module.os, "_exit", lambda code: exits.append(code))
+    site = FakeSite({"height_mm": 150})
+    serve(lambda: FakeEngine(fail=True), Client(site.url, SECRET, "pc-1"), once=True)  # "CUDA out of memory"
+    assert exits == []

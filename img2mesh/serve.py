@@ -10,7 +10,7 @@ import time
 
 from PIL import Image
 
-from .pipeline import GenerateOptions
+from .pipeline import GenerateOptions, is_gpu_fatal
 from .printable import PrintOptions
 from .protocol import Client, Job, ProtocolError
 
@@ -90,6 +90,11 @@ def run_job(client: Client, engine, job: Job) -> None:
             client.failed(job.id, f"{type(error).__name__}: {error}")
         except ProtocolError as report_error:
             log.warning("could not report failure: %s", report_error)
+        if is_gpu_fatal(error):
+            # The GPU context is unusable now; exit so Docker's restart policy
+            # starts a fresh worker instead of failing every following job.
+            log.error("GPU error: restarting the worker")
+            os._exit(3)
 
 
 def serve(engine_factory, client: Client, once: bool = False) -> None:

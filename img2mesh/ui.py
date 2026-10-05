@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import io
+import logging
+import os
 import tempfile
+import threading
 from pathlib import Path
 
 import trimesh
 
-from .pipeline import GenerateOptions, load_engine
+from .pipeline import GenerateOptions, is_gpu_fatal, load_engine
 from .printable import PrintOptions, to_gltf_axes
 
 AXES = ["engine default", "+x", "-x", "+y", "-y", "+z", "-z"]
@@ -42,6 +45,16 @@ def launch(host: str = "0.0.0.0", port: int = 7860) -> None:
             stl, stats = engine.to_stl(image, generate, printable, on_progress=lambda s, t: progress(s / t, desc="Generating shape"))
         except ValueError as error:
             raise gr.Error(str(error)) from error
+        except RuntimeError as error:
+            if not is_gpu_fatal(error):
+                raise
+            # The GPU context is broken for this process; restart it (Docker brings it back).
+            logging.getLogger("img2mesh").error("GPU error, restarting the test page: %s", error)
+            threading.Timer(2, os._exit, [3]).start()
+            raise gr.Error(
+                "GPU error (often: not enough GPU memory). The test page is restarting; reload it in about 3 minutes. "
+                "Try a lower Detail next time."
+            ) from error
         name = f"img2mesh-{engine.name}-seed{int(seed)}"
         path = out_dir / f"{name}.stl"
         path.write_bytes(stl)

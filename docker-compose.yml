@@ -42,6 +42,7 @@ services:
   ui:
     <<: *gpu-service
     command: ui
+    restart: unless-stopped  # comes back by itself after a GPU error
     ports:
       - "7860:7860"
     profiles: [ui]

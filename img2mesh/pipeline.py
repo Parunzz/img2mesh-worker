@@ -55,6 +55,16 @@ class Result:
     seconds: dict = field(default_factory=dict)
 
 
+# After errors like these the process's CUDA context is broken: every later job
+# fails too ("device not ready", then allocator asserts). Only a new process helps.
+GPU_FATAL_MARKERS = ("CUDA driver error", "CUDA error", "device not ready", "CUDACachingAllocator", "cudaError", "illegal memory access")
+
+
+def is_gpu_fatal(error: BaseException) -> bool:
+    text = f"{type(error).__name__}: {error}"
+    return any(marker in text for marker in GPU_FATAL_MARKERS)
+
+
 def has_transparency(image: Image.Image) -> bool:
     if image.mode != "RGBA":
         return False
