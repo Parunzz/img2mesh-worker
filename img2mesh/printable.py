@@ -98,14 +98,21 @@ def repair(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     ms.meshing_remove_duplicate_vertices()
     ms.meshing_remove_duplicate_faces()
     ms.meshing_remove_null_faces()
-    ms.meshing_repair_non_manifold_edges()
-    ms.meshing_repair_non_manifold_vertices()
-    ms.meshing_close_holes(maxholesize=MAX_HOLE_EDGES)
-    out = trimesh.Trimesh(ms.current_mesh().vertex_matrix(), ms.current_mesh().face_matrix(), process=True)
+
+    def close_holes(**kwargs) -> trimesh.Trimesh:
+        # Hole filling needs manifold edges, and a previous fill can leave new non-manifold ones.
+        ms.meshing_repair_non_manifold_edges()
+        ms.meshing_repair_non_manifold_vertices()
+        try:
+            ms.meshing_close_holes(maxholesize=MAX_HOLE_EDGES, **kwargs)
+        except pymeshlab.PyMeshLabException:
+            pass  # leave the holes; the cut falls back to plane slicing and capping
+        return trimesh.Trimesh(ms.current_mesh().vertex_matrix(), ms.current_mesh().face_matrix(), process=True)
+
+    out = close_holes()
     if not out.is_watertight:
         # A fill that would self-intersect is skipped by default; allow it for what is left.
-        ms.meshing_close_holes(maxholesize=MAX_HOLE_EDGES, selfintersection=False)
-        out = trimesh.Trimesh(ms.current_mesh().vertex_matrix(), ms.current_mesh().face_matrix(), process=True)
+        out = close_holes(selfintersection=False)
     trimesh.repair.fix_normals(out)
     return out
 
