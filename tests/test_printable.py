@@ -134,3 +134,18 @@ def test_repair_closes_inside_out_patches_and_a_big_hole(monkeypatch):
     sphere.faces = np.where(flipped[:, None], sphere.faces[:, ::-1], sphere.faces)
     out = repair(sphere)
     assert out.is_watertight and out.volume > 0
+
+
+def test_repair_fills_a_model_with_a_big_hole_instead_of_leaving_a_shell(monkeypatch):
+    import img2mesh.printable as printable
+
+    monkeypatch.setattr(printable, "VOXELS", 64)
+    sphere = trimesh.creation.icosphere(subdivisions=5)
+    # A hole ~0.2 wide: too wide to close as a crack (4 voxels = 0.125 at 64),
+    # narrow enough to fill as a tunnel (8 voxels = 0.25). A flood fill leaked here.
+    sphere.update_faces(sphere.triangles_center[:, 2] < 0.995)
+    sphere.remove_unreferenced_vertices()
+    out = printable.repair(sphere)
+    assert out.is_watertight
+    assert len(out.split()) == 1
+    assert out.volume > 0.9 * 4 / 3 * np.pi

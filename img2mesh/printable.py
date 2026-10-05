@@ -78,6 +78,8 @@ def to_gltf_axes(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
 VOXELS = 512
 # Cracks up to about twice this many voxels wide are closed.
 CLOSE_VOXELS = 2
+# Straight tunnels into the model through a hole, up to about twice this wide, are filled.
+TUNNEL_VOXELS = 4
 SMOOTH = 1.0  # voxels
 SURFACE_LEVEL = 0.84  # standard normal CDF at 1 / SMOOTH
 
@@ -89,8 +91,7 @@ def repair(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     (TRELLIS.2's have holes, cracks and inside-out patches, which show as dark
     areas and confuse slicers) are rebuilt as a solid: the surface is drawn
     into a voxel grid, small cracks are closed, the inside is filled, and the
-    outside surface is traced again with marching cubes. A hole too big to
-    close leaves a thin closed shell there instead of an opening.
+    outside surface is traced again with marching cubes.
     """
     mesh = mesh.copy()
     mesh.merge_vertices()
@@ -110,13 +111,29 @@ def _rebuild(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     # About 8 samples per voxel face of surface, plus every vertex.
     count = int(min(mesh.area / pitch**2 * 8, 30_000_000))
     points = np.vstack([trimesh.sample.sample_surface(mesh, count, seed=0)[0], mesh.vertices])
-    solid = np.zeros(shape, dtype=bool)
-    solid[tuple(((points - origin) / pitch).astype(int).T)] = True
-    solid = ndimage.binary_dilation(solid, iterations=CLOSE_VOXELS)
-    solid = ndimage.binary_fill_holes(solid)
-    # Erode one voxel less than dilated so a sheet left by a hole too big to close
-    # stays 3 voxels thick; blur away the voxel steps, then trace the surface one
-    # voxel in (the blurred value of a flat side, one voxel inside, is Phi(1/SMOOTH)).
+    surface = np.zeros(shape, dtype=bool)
+    surface[tuple(((points - origin) / pitch).astype(int).T)] = True
+    surface = ndimage.binary_dilation(surface, iterations=CLOSE_VOXELS)
+    # Outside = can see out of the grid along an axis without crossing the surface.
+    # A flood fill would leak through any hole and leave a hollow shell; this only
+    # lets a straight tunnel in, and tunnels narrower than the opening are dropped.
+    outside = np.zeros(shape, dtype=bool)
+    for axis in range(3):
+        for flip in (False, True):
+            run = np.flip(surface, axis) if flip else surface
+            seen = ~np.logical_or.accumulate(run, axis=axis)
+            outside |= np.flip(seen, axis) if flip else seen
+    outside = ndimage.binary_opening(outside, iterations=TUNNEL_VOXELS, border_value=1)
+    labels, _ = ndimage.label(outside)
+    edge = np.unique(np.concatenate([labels[[0, -1]].ravel(), labels[:, [0, -1]].ravel(), labels[:, :, [0, -1]].ravel()]))
+    solid = ~np.isin(labels, edge[edge > 0])
+    # Drop loose specks (stray samples, floating bits).
+    labels, count = ndimage.label(solid)
+    if count > 1:
+        sizes = np.bincount(labels.ravel())[1:]
+        solid = np.isin(labels, 1 + np.flatnonzero(sizes >= sizes.max() * 1e-3))
+    # Erode one voxel less than dilated; blur away the voxel steps, then trace the
+    # surface one voxel in (a blurred flat side reads Phi(1/SMOOTH) one voxel inside).
     solid = ndimage.binary_erosion(solid, iterations=CLOSE_VOXELS - 1)
     field = ndimage.gaussian_filter(solid.astype(np.float32), SMOOTH)
     vertices, faces, _, _ = marching_cubes(field, SURFACE_LEVEL)
